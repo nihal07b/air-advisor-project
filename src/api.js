@@ -1,12 +1,43 @@
 import { mockAdvice, mockReport } from './mock';
+
 const BASE = import.meta.env.VITE_API_BASE;
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
+
+const API_TIMEOUT = 10000;
 
 // Save profile locally because the backend profile endpoint
 // is not available yet.
 export const saveProfile = async (profile) => {
   return { profileId: 'demo1' };
 };
+
+// Fetch with timeout.
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, API_TIMEOUT);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(
+        'The request took too long. Please try again.'
+      );
+    }
+
+    throw new Error(
+      'Unable to connect. Check your internet connection and try again.'
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // Convert latitude and longitude to the nearest supported grid cell.
 function toCellId(lat, lon) {
@@ -30,7 +61,7 @@ export function isLocationSupported(place) {
   );
 }
 
-// Convert the API response into the format used by our components.
+// Convert API response into the format used by our components.
 function normalizeAdvice(data) {
   const options = data.options || [];
   const exposures = options.map((option) => option.exposure);
@@ -72,6 +103,12 @@ export const getAdvice = async (profileId, persona, home) => {
     return mockAdvice;
   }
 
+  if (!BASE) {
+    throw new Error(
+      'API URL is not configured. Please check your environment settings.'
+    );
+  }
+
   if (!home || !isLocationSupported(home)) {
     throw new Error(
       'Location outside coverage. Please choose a supported Delhi-NCR location.'
@@ -88,13 +125,23 @@ export const getAdvice = async (profileId, persona, home) => {
     }),
   });
 
-  const response = await fetch(`${BASE}/advise?${params}`);
+  const response = await fetchWithTimeout(
+    `${BASE}/advise?${params}`
+  );
 
   if (!response.ok) {
     throw new Error(`API error: ${response.status}`);
   }
 
-  const data = await response.json();
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      'The server returned an invalid response. Please try again.'
+    );
+  }
 
   if (data.aqi == null) {
     throw new Error(
@@ -104,15 +151,13 @@ export const getAdvice = async (profileId, persona, home) => {
 
   return normalizeAdvice(data);
 };
+
 export const getReport = async (profileId, persona, home) => {
-  // Use demonstration data when mock mode is enabled.
   if (USE_MOCK) {
     return mockReport;
   }
 
-  // The report endpoint has not been confirmed yet.
-  // Do not call an endpoint that may not exist.
   throw new Error(
-    'The real report API is not available yet. Please use mock mode to preview the report.'
+    'The real report API is not available yet. Please enable mock mode to preview the report.'
   );
 };

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getReport } from './api';
+
 import {
   BarChart,
   Bar,
@@ -17,68 +18,115 @@ export default function ReportView({ profile }) {
     data: null,
   });
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadReport = useCallback(async () => {
+    setState({
+      loading: true,
+      error: '',
+      data: null,
+    });
 
-    async function loadReport() {
+    try {
+      const data = await getReport(
+        profile?.profileId,
+        profile?.persona,
+        profile?.home
+      );
+
+      if (!data || !Array.isArray(data.daily) || data.daily.length === 0) {
+        throw new Error(
+          'No report data is available yet. Please try again later.'
+        );
+      }
+
       setState({
-        loading: true,
+        loading: false,
         error: '',
+        data,
+      });
+    } catch (error) {
+      setState({
+        loading: false,
+        error: error.message || 'Unable to load the report.',
         data: null,
       });
-
-      try {
-        const data = await getReport(
-          profile?.profileId,
-          profile?.persona,
-          profile?.home
-        );
-
-        if (!cancelled) {
-          setState({
-            loading: false,
-            error: '',
-            data,
-          });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setState({
-            loading: false,
-            error: error.message || 'Unable to load the report.',
-            data: null,
-          });
-        }
-      }
     }
-
-    loadReport();
-
-    return () => {
-      cancelled = true;
-    };
   }, [profile]);
 
+  useEffect(() => {
+    loadReport();
+  }, [loadReport]);
+
   if (state.loading) {
-    return <div className="card">Loading your exposure report...</div>;
+    return (
+      <section>
+        <div className="card" role="status">
+          Loading your exposure report...
+        </div>
+
+        <p className="note">
+          Air-quality estimates are for general guidance only,
+          not medical advice.
+        </p>
+      </section>
+    );
   }
 
   if (state.error) {
     return (
-      <div className="card">
-        <h2>Report unavailable</h2>
-        <p className="error">{state.error}</p>
-        <p>
-          The report uses demonstration data only when mock mode is enabled.
+      <section>
+        <div className="card">
+          <h2>Report unavailable</h2>
+
+          <p className="error" role="alert">
+            {state.error}
+          </p>
+
+          <button type="button" onClick={loadReport}>
+            Try again
+          </button>
+        </div>
+
+        <p className="note">
+          Air-quality estimates are for general guidance only,
+          not medical advice.
         </p>
-      </div>
+      </section>
     );
   }
 
   const report = state.data;
 
+  if (
+    report.totalExposure == null ||
+    report.averageDailyExposure == null ||
+    !report.bestDay ||
+    !report.worstDay ||
+    !Array.isArray(report.insights)
+  ) {
+    return (
+      <section>
+        <div className="card">
+          <h2>Report unavailable</h2>
+
+          <p>
+            The report data is incomplete. Please try again.
+          </p>
+
+          <button type="button" onClick={loadReport}>
+            Try again
+          </button>
+        </div>
+
+        <p className="note">
+          This report is for general guidance only,
+          not medical advice.
+        </p>
+      </section>
+    );
+  }
+
   return (
-    <div className="report-view">
+    <section className="report-view">
       <h2>Your Exposure Report</h2>
 
       <div className="card">
@@ -106,36 +154,46 @@ export default function ReportView({ profile }) {
         </p>
       </div>
 
-      <div className="card">
-        <h3>Daily exposure</h3>
+      {report.daily.length > 0 ? (
+        <div className="card">
+          <h3>Daily exposure</h3>
 
-        <div style={{ width: '100%', height: 260 }}>
-          <ResponsiveContainer>
-            <BarChart data={report.daily}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" fontSize={12} />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="exposure" fill="#64748b" />
-            </BarChart>
-          </ResponsiveContainer>
+          <div style={{ width: '100%', height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={report.daily}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" fontSize={12} />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="exposure" fill="#64748b" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="card">
+          No daily exposure data is available yet.
+        </div>
+      )}
 
       <div className="card">
         <h3>Insights</h3>
 
-        <ul>
-          {report.insights.map((insight, index) => (
-            <li key={index}>{insight}</li>
-          ))}
-        </ul>
+        {report.insights.length > 0 ? (
+          <ul>
+            {report.insights.map((insight, index) => (
+              <li key={index}>{insight}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>No insights are available yet.</p>
+        )}
       </div>
 
       <p className="note">
-        This report contains illustrative estimates for demonstration purposes.
-        It is not medical advice.
+        This report contains illustrative estimates for demonstration
+        purposes. It is not medical advice.
       </p>
-    </div>
+    </section>
   );
 }
